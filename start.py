@@ -91,16 +91,19 @@ def main_loop():
         if check_wifi():
             log.info("Connection to GCM confirmed. Sleeping easy...")
             led_on()
-            
+             
             if not gpioCallbackControl:
                 # Start monitoring GPIO pin for a falling edge
                 start_gpio_monitor()    
         else:
             BlinkyThread( blink_ping_failed ).start()   # ALARM! Connectivity lost...
             stop_gpio_monitor()
-        
+
+        #         
         # Wake up after this interval to check the connectivity again
+        #
         time.sleep(PING_EVERY_SEC)
+        
 
 def switch_pressed_callback(gpio, level, tick):
     log.info("==============================================")
@@ -138,7 +141,7 @@ def switch_pressed_callback(gpio, level, tick):
         log.error("Distress call transmitted.")
         BlinkyThread( blink_distress_call_transmitted ).start()   # Distress call transmitted
         stop_gpio_monitor()
-        time.sleep(10)
+        time.sleep(20) # Light show for 20 seconds
         start_gpio_monitor()
         led_on()
     else:
@@ -167,12 +170,24 @@ def blink_ping_failed():
     gpio.write(LED_PIN, 0)
     time.sleep(0.1)
 
-# Distress call transmitted successfully
+# Distress call transmitted successfully blink. This creates a "breathing" LED effect.
 def blink_distress_call_transmitted():
-    gpio.write(LED_PIN, 1)
-    time.sleep(0.4)
-    gpio.write(LED_PIN, 0)
-    time.sleep(0.4)
+    speed = 0.01
+    delta = 4
+    steps = 256 / delta
+    
+    for i in range(steps):
+        gpio.set_PWM_dutycycle(LED_PIN, delta*i + 1)
+        time.sleep(speed)
+        
+    time.sleep(1)
+    
+    for i in reversed(range(steps)):
+        gpio.set_PWM_dutycycle(LED_PIN, delta*i + 1)
+        time.sleep(speed)
+        
+    time.sleep(0.3)
+    
     
 def led_on():
     led_control(1)
