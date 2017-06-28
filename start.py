@@ -9,9 +9,8 @@ Created on Jun 22, 2017
 #
 LED_PIN     = 3
 SWITCH_PIN  = 11
-PING_EVERY_SEC=120
-GCM_COMMAND = ""
-PING_TARGET = "fcm.googleapis.com"
+PING_EVERY_SEC = 120
+FCM_TARGET_URL = "fcm.googleapis.com"
 
 
 import sys
@@ -104,7 +103,9 @@ def main_loop():
         #
         time.sleep(PING_EVERY_SEC)
         
-
+#
+# Sends an FCM message to "mother_alert" topic, which triggers the Android app
+#
 def switch_pressed_callback(gpio, level, tick):
     log.info("==============================================")
     log.info(">>>>>>>>>>>>>>>>>> ALARM! <<<<<<<<<<<<<<<<<<<<")
@@ -112,7 +113,7 @@ def switch_pressed_callback(gpio, level, tick):
     log.info("==============================================")
     log.info("Transmitting distress call...")
     
-    fcm_url = 'https://fcm.googleapis.com/fcm/send'
+    fcm_url = 'https://' + FCM_TARGET_URL + '/fcm/send'
     postData = json.dumps({
         "to": "/topics/mother_alert", 
         "data": {"message": "ALARM"}
@@ -138,8 +139,8 @@ def switch_pressed_callback(gpio, level, tick):
     c.close()
     
     if ( responseCode == 200 ):
-        log.error("Distress call transmitted.")
-        BlinkyThread( blink_distress_call_transmitted ).start()   # Distress call transmitted
+        log.error("Distress call transmitted successfully.")
+        BlinkyThread( blink_distress_call_transmitted ).start()   # Begin the light show
         stop_gpio_monitor()
         time.sleep(20) # Light show for 20 seconds
         start_gpio_monitor()
@@ -262,7 +263,7 @@ def check_wifi():
     
     log.info("Currently connected to: %s" % (ssid))
     if ssid:
-        response = os.system("ping -c 1 %s"  % (PING_TARGET))
+        response = os.system("ping -c 1 %s"  % (FCM_TARGET_URL))
         if response == 0:
             connectionIsGood = True
         else:
