@@ -10,6 +10,8 @@ Created on Jun 22, 2017
 LED_PIN     = 3
 SWITCH_PIN  = 11
 PING_EVERY_SEC=120
+GCM_COMMAND = ""
+PING_TARGET = "fcm.googleapis.com"
 
 
 import sys
@@ -17,6 +19,9 @@ import os
 import signal
 import threading
 import time
+import json
+import pycurl
+from StringIO import StringIO
 
 #
 # Logging Setup
@@ -59,11 +64,13 @@ gpioCallbackControl = None
 def start_gpio_monitor():
     global gpioCallbackControl
     gpioCallbackControl = gpio.callback(SWITCH_PIN, pigpio.FALLING_EDGE, switch_pressed_callback)
+    log.info("Alarm callback is active!")
 
 def stop_gpio_monitor():
     global gpioCallbackControl
     gpioCallbackControl.cancel()
     gpioCallbackControl = None
+    log.info("Alarm callback is deactivated.")
 
 
 
@@ -100,6 +107,46 @@ def switch_pressed_callback(gpio, level, tick):
     log.info(">>>>>>>>>>>>>>>>>> ALARM! <<<<<<<<<<<<<<<<<<<<")
     log.info(">>>>>>>>>>>>> MEDICAL EMERGENCY! <<<<<<<<<<<<<")
     log.info("==============================================")
+    log.info("Transmitting distress call...")
+    
+    fcm_url = 'https://fcm.googleapis.com/fcm/send'
+    postData = json.dumps({
+        "to": "/topics/mother_alert", 
+        "data": {"message": "ALARM"}
+    })
+    headers = [
+        'Authorization:key=SERVER_KEY_HERE',
+        'Content-Type:application/json'
+    ]
+    
+    responseDataBuffer = StringIO()
+    c = pycurl.Curl()
+    c.setopt(pycurl.URL, fcm_url)
+    c.setopt(pycurl.HTTPHEADER, headers)
+    c.setopt(pycurl.POST, 1)
+    c.setopt(pycurl.POSTFIELDS, postData)
+    c.setopt(pycurl.WRITEFUNCTION, responseDataBuffer.write)
+    c.perform()
+    
+    responseCode = c.getinfo(c.RESPONSE_CODE)
+    log.info('Status: %d' % responseCode)
+    log.info(responseDataBuffer.getvalue())
+
+    c.close()
+    
+    if ( responseCode == 200 ):
+        log.error("Distress call transmitted.")
+        BlinkyThread( blink_distress_call_transmitted ).start()   # Distress call transmitted
+        stop_gpio_monitor()
+        time.sleep(10)
+        start_gpio_monitor()
+        led_on()
+    else:
+        log.error("DISTRESS CALL FAILED!!!")
+        BlinkyThread( blink_ping_failed ).start()   # ALARM! Connectivity lost...
+        
+
+    
 
 
 ##############################
@@ -119,6 +166,13 @@ def blink_ping_failed():
     time.sleep(0.1)
     gpio.write(LED_PIN, 0)
     time.sleep(0.1)
+
+# Distress call transmitted successfully
+def blink_distress_call_transmitted():
+    gpio.write(LED_PIN, 1)
+    time.sleep(0.4)
+    gpio.write(LED_PIN, 0)
+    time.sleep(0.4)
     
 def led_on():
     led_control(1)
@@ -193,7 +247,7 @@ def check_wifi():
     
     log.info("Currently connected to: %s" % (ssid))
     if ssid:
-        response = os.system("ping -c 1 www.google.ca")
+        response = os.system("ping -c 1 %s"  % (PING_TARGET))
         if response == 0:
             connectionIsGood = True
         else:
