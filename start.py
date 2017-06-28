@@ -7,8 +7,8 @@ Created on Jun 22, 2017
 #
 # General Configuration
 #
-LED_PIN = 3
-SWITCH_PIN = 11
+LED_PIN     = 3
+SWITCH_PIN  = 11
 PING_EVERY_SEC=120
 
 
@@ -32,7 +32,10 @@ log.setLevel(logging.INFO)
 from wireless import Wireless
 network = Wireless('wlan0')
 
-#
+##########################################
+#         PIGPIO CONTROLLER STUFF        #
+##########################################
+
 # Setup pigpio
 #
 import pigpio
@@ -43,31 +46,66 @@ if not gpio.connected:
 else:
     log.info("pigpio init successful.")
     gpio.set_mode           (LED_PIN, pigpio.OUTPUT)
-    gpio.set_pull_up_down   (LED_PIN, pigpio.PUD_DOWN)
+    gpio.set_pull_up_down   (LED_PIN, pigpio.PUD_DOWN)  # Pull the pin to GND when its not 1, so no current flow to LED
     gpio.write              (LED_PIN, 0)
     
+    gpio.set_mode           (SWITCH_PIN, pigpio.INPUT);
+    gpio.set_pull_up_down   (SWITCH_PIN, pigpio.PUD_UP) # Pull the PIN up to 3.3V, unless the switch connects it to GND
+    gpio.set_glitch_filter  (SWITCH_PIN, 1000) # Debounce the switch by waiting 1ms before reporting signal change
+
+# Setup button press callback
+#
+gpioCallbackControl = None
+def start_gpio_monitor():
+    global gpioCallbackControl
+    gpioCallbackControl = gpio.callback(SWITCH_PIN, pigpio.FALLING_EDGE, switch_pressed_callback)
+
+def stop_gpio_monitor():
+    global gpioCallbackControl
+    gpioCallbackControl.cancel()
+    gpioCallbackControl = None
+
+
+
+############################
+#         MAIN LOOP        #
+############################
 
 # This flag is used to flash the LED on boot up or after we lost the WiFi signal 
 connectionInterrupted = True
 
-#
 # The Main loop
 #
 def main_loop():
     log.info("Starting main loop...")
-
+    
     # Loop forever
     while True:
         if check_wifi():
             log.info("Connection to GCM confirmed. Sleeping easy...")
             led_on()
+            
+            if not gpioCallbackControl:
+                # Start monitoring GPIO pin for a falling edge
+                start_gpio_monitor()    
         else:
-            BlinkyThread( blink_ping_failed ).start()
+            BlinkyThread( blink_ping_failed ).start()   # ALARM! Connectivity lost...
+            stop_gpio_monitor()
         
         # Wake up after this interval to check the connectivity again
         time.sleep(PING_EVERY_SEC)
 
-            
+def switch_pressed_callback(gpio, level, tick):
+    log.info("==============================================")
+    log.info(">>>>>>>>>>>>>>>>>> ALARM! <<<<<<<<<<<<<<<<<<<<")
+    log.info(">>>>>>>>>>>>> MEDICAL EMERGENCY! <<<<<<<<<<<<<")
+    log.info("==============================================")
+
+
+##############################
+#         LED CONTROL        #
+##############################
+           
 # Ping-in-progress blink
 def blink_pinging():
     gpio.write(LED_PIN, 1)
@@ -75,7 +113,7 @@ def blink_pinging():
     gpio.write(LED_PIN, 0)
     time.sleep(0.7)
 
-# Ping failed error code blink
+# Ping failed error blink
 def blink_ping_failed():
     gpio.write(LED_PIN, 1)
     time.sleep(0.1)
@@ -124,7 +162,7 @@ class BlinkyThread (threading.Thread):
             led_off()
             
             executeBlinkProgramFlag = 1     # Commence the blinky loop
-            currentBlinkyThread = self      # This is how we achieve singleton behavior for blinky class 
+            currentBlinkyThread = self      # This is how we achieve singleton behavior for the blinky class 
             
         
     def run(self):
@@ -135,18 +173,20 @@ class BlinkyThread (threading.Thread):
             while executeBlinkProgramFlag:
                 self.blink_function()       # Do the blinking until the global flag tells us to stop
             log.debug("Exiting " + self.name)
+################################################################
+
 
 # 
 # Make sure we are connected to wifi and that we can ping Google
 #
 def check_wifi():
-    # If previous state was disconnected, give the 5 second slow blink signal 
+    # If previous state was disconnected, give the 3 second slow blink signal 
     # to indicate that we are about to try pinging again
     #
     global connectionInterrupted
     if connectionInterrupted:
         BlinkyThread( blink_pinging ).start()
-        time.sleep(5)
+        time.sleep(3)
     
     ssid = get_current_ssid()
     connectionIsGood = False
@@ -168,11 +208,17 @@ def check_wifi():
 def get_current_ssid():
     return network.current().split(' ', 1)[0]
 
+
+####################################
+#         BOILER PLATE CRAP        #
+####################################
+
 #
 # Graceful Exit
 #
 def ctrl_c_handler(signal, frame):
     log.info('Cleaning up...')
+    stop_gpio_monitor()
     led_off()
     gpio.stop()
     sys.exit(0)
